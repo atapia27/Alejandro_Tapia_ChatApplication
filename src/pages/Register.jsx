@@ -1,9 +1,7 @@
 import React, { useState } from "react";
-import Add from "../img/addAvatar.png";
-import DefaultAvatar from "../img/avatar.png"; // Import the default avatar image
+import DefaultAvatar from "../img/avatar.png"; // Local image used as default
 import { createUserWithEmailAndPassword, updateProfile } from "firebase/auth";
-import { auth, db, storage } from "../firebase";
-import { ref, uploadBytesResumable, getDownloadURL } from "firebase/storage";
+import { auth, db } from "../firebase";
 import { doc, setDoc } from "firebase/firestore";
 import { useNavigate, Link } from "react-router-dom";
 
@@ -13,51 +11,36 @@ const Register = () => {
   const navigate = useNavigate();
 
   const handleSubmit = async (e) => {
-    setLoading(true);
     e.preventDefault();
+    setLoading(true);
+
     const displayName = e.target[0].value;
     const email = e.target[1].value;
     const password = e.target[2].value;
-    const file = e.target[3].files[0];
 
     try {
-      //Create user
       const res = await createUserWithEmailAndPassword(auth, email, password);
 
-      let photoURL = DefaultAvatar; // Set default avatar initially
+      const defaultAvatarURL = DefaultAvatar; // fallback avatar for all users
 
-      if (file) {
-        //Create a unique image name
-        const date = new Date().getTime();
-        const storageRef = ref(storage, `${displayName + date}`);
-
-        await uploadBytesResumable(storageRef, file).then(() => {
-          getDownloadURL(storageRef).then(async (downloadURL) => {
-            photoURL = downloadURL; // Set photoURL to downloaded image URL
-          });
-        });
-      }
-
-      // Update profile with either the uploaded image or default avatar
       await updateProfile(res.user, {
         displayName,
-        photoURL,
+        photoURL: defaultAvatarURL,
       });
 
-      // Create user on firestore
       await setDoc(doc(db, "users", res.user.uid), {
         uid: res.user.uid,
         displayName,
         email,
-        photoURL,
+        photoURL: defaultAvatarURL,
       });
 
-      // Create empty user chats on firestore
       await setDoc(doc(db, "userChats", res.user.uid), {});
       navigate("/");
     } catch (err) {
-      console.log(err);
+      console.error(err);
       setErr(true);
+    } finally {
       setLoading(false);
     }
   };
@@ -71,17 +54,14 @@ const Register = () => {
           <input required type="text" placeholder="display name" />
           <input required type="email" placeholder="email" />
           <input required type="password" placeholder="password" />
-          <input required style={{ display: "none" }} type="file" id="file" />
-          <label htmlFor="file">
-            <img src={Add} alt="" />
-            <span>Add an avatar</span>
-          </label>
+          <div className="avatarPreview">
+          </div>
           <button disabled={loading}>Sign up</button>
-          {loading && "Uploading and compressing the image please wait..."}
+          {loading && "Creating your account..."}
           {err && <span>Something went wrong</span>}
         </form>
         <p>
-          Account already exists! <Link to="/login">Login</Link>
+          Account already exists? <Link to="/login">Login</Link>
         </p>
       </div>
     </div>
