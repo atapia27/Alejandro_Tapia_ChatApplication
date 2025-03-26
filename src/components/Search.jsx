@@ -1,8 +1,6 @@
 import React, { useContext, useEffect, useState } from "react";
 import {
   collection,
-  query,
-  where,
   getDocs,
   setDoc,
   doc,
@@ -12,59 +10,50 @@ import {
 } from "firebase/firestore";
 import { db } from "../firebase";
 import { AuthContext } from "../context/AuthContext";
+import { ChatContext } from "../context/ChatContext";
 
 const Search = () => {
   const [username, setUsername] = useState("");
-  const [users, setUsers] = useState([]);
+  const [allUsers, setAllUsers] = useState([]); // store all fetched users
+  const [filteredUsers, setFilteredUsers] = useState([]);
   const [err, setErr] = useState(false);
+
   const { currentUser } = useContext(AuthContext);
+  const { dispatch } = useContext(ChatContext);
 
-  // Fetch all users on mount or when search is cleared
-  const fetchUsers = async () => {
-    try {
-      const usersRef = collection(db, "users");
-      const querySnapshot = await getDocs(usersRef);
-      const usersList = querySnapshot.docs
-        .map((doc) => doc.data())
-        .filter((user) => user.uid !== currentUser.uid); // exclude self
-      setUsers(usersList);
+  useEffect(() => {
+    const fetchAllUsers = async () => {
+      try {
+        const querySnapshot = await getDocs(collection(db, "users"));
+        const users = querySnapshot.docs
+          .map((doc) => doc.data())
+          .filter((user) => user.uid !== currentUser.uid);
+
+        setAllUsers(users);
+      } catch (error) {
+        console.error("Failed to fetch users:", error);
+      }
+    };
+
+    fetchAllUsers();
+  }, [currentUser]);
+
+  useEffect(() => {
+    const term = username.trim().toLowerCase();
+
+    if (!term) {
+      setFilteredUsers([]);
       setErr(false);
-    } catch (error) {
-      console.error("Failed to fetch users:", error);
-      setErr(true);
-    }
-  };
-
-  // Search specific user(s) by displayName
-  const handleSearch = async () => {
-    if (!username) {
-      fetchUsers(); // reset to all users
       return;
     }
 
-    const q = query(
-      collection(db, "users"),
-      where("displayName", "==", username)
+    const matched = allUsers.filter((user) =>
+      user.displayName.toLowerCase().includes(term),
     );
 
-    try {
-      const querySnapshot = await getDocs(q);
-      const foundUsers = querySnapshot.docs
-        .map((doc) => doc.data())
-        .filter((user) => user.uid !== currentUser.uid);
-      setUsers(foundUsers);
-      setErr(foundUsers.length === 0);
-    } catch (error) {
-      console.error("Search failed:", error);
-      setErr(true);
-    }
-  };
-
-  const handleKey = (e) => {
-    if (e.code === "Enter") {
-      handleSearch();
-    }
-  };
+    setFilteredUsers(matched);
+    setErr(matched.length === 0);
+  }, [username, allUsers]);
 
   const handleSelect = async (user) => {
     const combinedId =
@@ -78,57 +67,72 @@ const Search = () => {
       if (!res.exists()) {
         await setDoc(doc(db, "chats", combinedId), { messages: [] });
 
+        const currentUserData = {
+          uid: user.uid,
+          displayName: user.displayName,
+          photoURL: user.photoURL,
+        };
+
+        const otherUserData = {
+          uid: currentUser.uid,
+          displayName: currentUser.displayName,
+          photoURL: currentUser.photoURL,
+        };
+
         await updateDoc(doc(db, "userChats", currentUser.uid), {
-          [combinedId + ".userInfo"]: {
-            uid: user.uid,
-            displayName: user.displayName,
-            photoURL: user.photoURL,
-          },
-          [combinedId + ".date"]: serverTimestamp(),
+          [`${combinedId}.userInfo`]: currentUserData,
+          [`${combinedId}.date`]: serverTimestamp(),
         });
 
         await updateDoc(doc(db, "userChats", user.uid), {
-          [combinedId + ".userInfo"]: {
-            uid: currentUser.uid,
-            displayName: currentUser.displayName,
-            photoURL: currentUser.photoURL,
-          },
-          [combinedId + ".date"]: serverTimestamp(),
+          [`${combinedId}.userInfo`]: otherUserData,
+          [`${combinedId}.date`]: serverTimestamp(),
         });
       }
+
+      dispatch({ type: "CHANGE_USER", payload: user });
     } catch (err) {
       console.error("Failed to create/select chat:", err);
     }
 
     setUsername("");
-    fetchUsers(); // refresh list
+    setFilteredUsers([]);
+    setErr(false);
   };
 
-  useEffect(() => {
-    fetchUsers();
-  }, []);
-
   return (
-    <div className="search">
-      <div className="searchForm">
-        <input
-          type="text"
-          placeholder="Search Alex to test"
-          onKeyDown={handleKey}
-          onChange={(e) => setUsername(e.target.value)}
-          value={username}
-          style={{ width: "100%" }}
-        />
+    <div className="px-4 py-2 border-b-2 ">
+      <input
+        type="text"
+        placeholder="Search users..."
+        onChange={(e) => setUsername(e.target.value)}
+        value={username}
+        className="w-full px-3 py-2 rounded-md border border-gray-300 focus:outline-none focus:ring-2 focus:ring-blue-500"
+      />
+      {err && <p className="text-sm text-red-500 mt-2">User not found</p>}
+
+      <div className="mt-4 max-h-64 overflow-y-auto pr-1 space-y-2">
+        {username.trim() ? (
+          filteredUsers.map((user) => (
+            <div
+              key={user.uid}
+              className="flex items-center gap-3 p-2 cursor-pointer hover:bg-gray-100 rounded"
+              onClick={() => handleSelect(user)}
+            >
+              <img
+                src={user.photoURL}
+                alt=""
+                className="w-10 h-10 rounded-full object-cover"
+              />
+              <span className="font-medium">{user.displayName}</span>
+            </div>
+          ))
+        ) : (
+          <p className="text-sm text-gray-400 italic">
+            Searched users will appear here
+          </p>
+        )}
       </div>
-      {err && <span>User not found!</span>}
-      {users.map((user) => (
-        <div key={user.uid} className="userChat" onClick={() => handleSelect(user)}>
-          <img src={user.photoURL} alt="" />
-          <div className="userChatInfo">
-            <span>{user.displayName}</span>
-          </div>
-        </div>
-      ))}
     </div>
   );
 };
